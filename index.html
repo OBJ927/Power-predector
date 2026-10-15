@@ -1,0 +1,291 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#102b46">
+<title>Power Predictor</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f0f4f8;color:#17283c;font-family:Arial,sans-serif}
+header{background:#102b46;color:white;padding:24px 16px;text-align:center}
+header h1{margin:0 0 8px;color:#f7c948}
+header p{margin:0}
+main{max-width:720px;margin:auto;padding:14px}
+section{background:white;padding:16px;margin:12px 0;border-radius:14px;box-shadow:0 2px 8px #0001}
+h2{font-size:19px;margin-top:0}
+label{display:block;margin:12px 0 6px;font-weight:bold}
+select,input,button{font:inherit;padding:11px;border-radius:8px}
+select,input{width:100%;border:1px solid #bdc9d6;background:white}
+button{border:0;background:#1266a8;color:white;font-weight:bold;cursor:pointer;margin:5px 3px 5px 0}
+button.secondary{background:#526477}
+button.danger{background:#a93232}
+.nums{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0}
+.ball{width:38px;height:38px;border-radius:50%;background:#e6edf5;display:flex;align-items:center;justify-content:center;font-weight:bold}
+.ball.bonus{background:#f7c948;color:#17283c}
+.stat{padding:10px;background:#edf4fa;border-radius:8px;margin:7px 0}
+.small{font-size:13px;color:#526477}
+li{margin:10px 0;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<header>
+<h1>⚡ Power Predictor</h1>
+<p>Historial, estadísticas y análisis de sorteos</p>
+</header>
+<main>
+
+<section>
+<h2>1. Seleccionar lotería</h2>
+<label for="game">Sorteo</label>
+<select id="game">
+<option value="power">Powerball</option>
+<option value="mega">Mega Millions</option>
+</select>
+<p class="small" id="rules"></p>
+</section>
+
+<section>
+<h2>2. Registrar resultado oficial</h2>
+<label for="drawDate">Fecha del sorteo</label>
+<input id="drawDate" type="date">
+<label>Números principales (separados por comas)</label>
+<input id="mainNums" placeholder="Ejemplo: 12, 18, 25, 44, 61">
+<label id="bonusLabel" for="bonusNum">Bola especial</label>
+<input id="bonusNum" type="number" placeholder="Ejemplo: 9">
+<button id="saveDraw">Guardar sorteo</button>
+<p class="small">Introduce resultados oficiales verificados. Los datos no se descargan automáticamente.</p>
+</section>
+
+<section>
+<h2>3. Generar combinación</h2>
+<p class="small">Genera una combinación aleatoria válida para la lotería seleccionada.</p>
+<button id="generate">Generar números</button>
+<div id="generated"></div>
+<button id="saveCombo" class="secondary">Guardar combinación</button>
+</section>
+
+<section>
+<h2>4. Estadísticas históricas</h2>
+<div id="stats"></div>
+<button id="refresh" class="secondary">Actualizar estadísticas</button>
+</section>
+
+<section>
+<h2>5. Comparar sorteos consecutivos</h2>
+<div id="patterns"></div>
+</section>
+
+<section>
+<h2>6. Comprobar combinaciones guardadas</h2>
+<label for="checkDate">Fecha del resultado oficial</label>
+<select id="checkDate"><option value="">Selecciona un sorteo guardado</option></select>
+<button id="checkCombos">Comprobar aciertos</button>
+<div id="checkResults"></div>
+</section>
+
+<section>
+<h2>7. Historial de sorteos</h2>
+<div id="history"></div>
+<button id="export" class="secondary">Exportar datos</button>
+<button id="importBtn" class="secondary">Importar copia</button>
+<input id="importFile" type="file" accept=".json,application/json" hidden>
+<button id="clear" class="danger">Borrar todos los datos</button>
+<p class="small">Los datos se guardan en el almacenamiento local del navegador. Exporta una copia para evitar perderlos.</p>
+</section>
+</main>
+<script>
+
+const $=id=>document.getElementById(id);
+const RULES={
+power:{name:"Powerball",count:5,max:69,bonusMax:26},
+mega:{name:"Mega Millions",count:5,max:70,bonusMax:24}
+};
+let draws=[],combos=[],current=null;
+try{
+draws=JSON.parse(localStorage.getItem("pp_draws")||"[]");
+combos=JSON.parse(localStorage.getItem("pp_combos")||"[]");
+}catch(e){draws=[];combos=[];}
+
+function persist(){
+try{
+localStorage.setItem("pp_draws",JSON.stringify(draws));
+localStorage.setItem("pp_combos",JSON.stringify(combos));
+return true;
+}catch(e){
+alert("No se pudieron guardar los datos. Exporta una copia y revisa el almacenamiento del navegador.");
+return false;
+}
+}
+function rule(){return RULES[$("game").value];}
+function validNums(arr,max,count){
+return arr.length===count&&arr.every(n=>Number.isInteger(n)&&n>=1&&n<=max)&&new Set(arr).size===count;
+}
+function numsFrom(text){
+return text.split(",").map(x=>x.trim()).filter(Boolean).map(Number);
+}
+function dateToday(){return new Date().toLocaleDateString("en-CA");}
+function updateRules(){
+const r=rule();
+$("rules").textContent=`${r.name}: ${r.count} números del 1 al ${r.max}, más una bola especial del 1 al ${r.bonusMax}.`;
+$("bonusLabel").textContent=$("game").value==="power"?"Powerball (1–26)":"Mega Ball (1–24)";
+$("bonusNum").max=r.bonusMax;
+render();
+}
+function sortedDraws(game){
+return draws.filter(d=>d.game===game).sort((a,b)=>a.date.localeCompare(b.date));
+}
+function balls(arr,bonus){
+return '<div class="nums">'+arr.map(n=>`<span class="ball">${n}</span>`).join("")+
+`<span class="ball bonus">${bonus}</span></div>`;
+}
+$("drawDate").value=dateToday();
+
+$("saveDraw").onclick=()=>{
+const r=rule(),date=$("drawDate").value;
+const nums=numsFrom($("mainNums").value),bonus=Number($("bonusNum").value);
+if(!date){alert("Selecciona la fecha.");return;}
+if(!validNums(nums,r.max,r.count)){
+alert(`Escribe ${r.count} números distintos entre 1 y ${r.max}, separados por comas.`);
+return;
+}
+if(!Number.isInteger(bonus)||bonus<1||bonus>r.bonusMax){
+alert("La bola especial no es válida.");return;
+}
+if(draws.some(d=>d.game===$("game").value&&d.date===date)){
+if(!confirm("Ya existe un sorteo de esa lotería y fecha. ¿Reemplazarlo?"))return;
+draws=draws.filter(d=>!(d.game===$("game").value&&d.date===date));
+}
+draws.push({game:$("game").value,date,nums:nums.slice().sort((a,b)=>a-b),bonus});
+if(persist()){
+alert("Sorteo guardado.");
+$("mainNums").value="";
+$("bonusNum").value="";
+render();
+}
+};
+
+$("generate").onclick=()=>{
+const r=rule(),arr=[];
+while(arr.length<r.count){
+let n=1+Math.floor(Math.random()*r.max);
+if(!arr.includes(n))arr.push(n);
+}
+arr.sort((a,b)=>a-b);
+current={game:$("game").value,nums:arr,bonus:1+Math.floor(Math.random()*r.bonusMax)};
+$("generated").innerHTML=balls(current.nums,current.bonus)+`<p>${r.name}</p>`;
+};
+$("saveCombo").onclick=()=>{
+if(!current||current.game!==$("game").value){
+alert("Primero genera una combinación.");return;
+}
+combos.push({...current,id:Date.now(),date:dateToday()});
+if(persist()){alert("Combinación guardada.");render();}
+};
+
+function renderStats(game){
+const r=RULES[game],list=sortedDraws(game);
+if(!list.length)return "<p>Aún no hay sorteos registrados. Agrega resultados oficiales para calcular estadísticas.</p>";
+const freq=Array(r.max+1).fill(0),bf=Array(r.bonusMax+1).fill(0);
+let even=0,odd=0,mainTotal=0,bonusEven=0,bonusOdd=0;
+list.forEach(d=>{
+d.nums.forEach(n=>{
+freq[n]++;mainTotal++;
+if(n%2===0)even++;else odd++;
+});
+bf[d.bonus]++;
+if(d.bonus%2===0)bonusEven++;else bonusOdd++;
+});
+const ranking=Array.from({length:r.max},(_,i)=>i+1).sort((a,b)=>freq[b]-freq[a]||a-b);
+const hot=ranking.filter(n=>freq[n]>0).slice(0,5);
+const cold=Array.from({length:r.max},(_,i)=>i+1).filter(n=>freq[n]===0);
+const br=Array.from({length:r.bonusMax},(_,i)=>i+1).sort((a,b)=>bf[b]-bf[a]||a-b);
+return `<div class="stat">Sorteos registrados: <b>${list.length}</b></div>
+<div class="stat">Números principales: pares ${even} (${(100*even/mainTotal).toFixed(1)}%) · impares ${odd} (${(100*odd/mainTotal).toFixed(1)}%)</div>
+<div class="stat">Bolas especiales: pares ${bonusEven} · impares ${bonusOdd}</div>
+<div class="stat">Más frecuentes en esta muestra: <b>${hot.join(", ")||"Sin datos"}</b></div>
+<div class="stat">Nunca aparecieron en esta muestra: <b>${cold.slice(0,30).join(", ")||"Todos han aparecido"}</b>${cold.length>30?"…":""}</div>
+<div class="stat">Bolas especiales más frecuentes: <b>${br.filter(n=>bf[n]>0).slice(0,5).join(", ")||"Sin datos"}</b></div>
+<p class="small">Frecuencias basadas solo en los ${list.length} sorteos que guardaste; no implican mayor probabilidad futura.</p>`;
+}
+function renderPatterns(game){
+const list=sortedDraws(game);
+if(list.length<2)return "<p>Necesitas al menos dos sorteos guardados de esta lotería.</p>";
+let transitions={},overlap=0;
+for(let i=1;i<list.length;i++){
+const prev=list[i-1],now=list[i];
+const p=prev.nums.filter(n=>n%2===0).length;
+const c=now.nums.filter(n=>n%2===0).length;
+const key=`${p} pares → ${c} pares`;
+transitions[key]=(transitions[key]||0)+1;
+overlap+=now.nums.filter(n=>prev.nums.includes(n)).length;
+}
+const rows=Object.entries(transitions).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<li>${k}: ${v} veces</li>`).join("");
+return `<p>Transiciones de pares en números principales entre sorteos consecutivos:</p><ul>${rows}</ul>
+<div class="stat">Coincidencias de números principales entre sorteos consecutivos: ${overlap}</div>
+<p class="small">Los sorteos se ordenan por fecha. Una muestra pequeña puede ser engañosa.</p>`;
+}
+function render(){
+$("stats").innerHTML=renderStats($("game").value);
+$("patterns").innerHTML=renderPatterns($("game").value);
+$("history").innerHTML=draws.length?
+draws.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(d=>
+`<div class="stat"><b>${RULES[d.game].name} · ${d.date}</b>${balls(d.nums,d.bonus)}
+<button class="danger" onclick="deleteDraw('${d.game}','${d.date}')">Eliminar</button></div>`).join("")
+:"<p>No hay sorteos guardados.</p>";
+$("checkDate").innerHTML='<option value="">Selecciona un sorteo guardado</option>'+
+draws.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(d=>
+`<option value="${d.game}|${d.date}">${RULES[d.game].name} · ${d.date}</option>`).join("");
+}
+window.deleteDraw=(game,date)=>{
+if(!confirm("¿Eliminar este sorteo?"))return;
+draws=draws.filter(d=>!(d.game===game&&d.date===date));
+persist();render();
+};
+$("checkCombos").onclick=()=>{
+const val=$("checkDate").value;
+if(!val){alert("Selecciona un sorteo.");return;}
+const [game,date]=val.split("|");
+const d=draws.find(x=>x.game===game&&x.date===date);
+const list=combos.filter(c=>c.game===game);
+$("checkResults").innerHTML=list.length?list.map(c=>{
+const hits=c.nums.filter(n=>d.nums.includes(n)).length;
+const bonus=c.bonus===d.bonus;
+return `<div class="stat">Combinación ${c.date}: ${hits} números principales acertados; bola especial ${bonus?"acertada":"no acertada"}.</div>`;
+}).join(""):"<p>No hay combinaciones guardadas para esta lotería.</p>";
+};
+$("refresh").onclick=render;
+$("game").onchange=updateRules;
+
+$("export").onclick=()=>{
+const blob=new Blob([JSON.stringify({draws,combos},null,2)],{type:"application/json"});
+const url=URL.createObjectURL(blob),a=document.createElement("a");
+a.href=url;a.download="power-predictor-copia.json";
+a.click();URL.revokeObjectURL(url);
+};
+$("importBtn").onclick=()=>$("importFile").click();
+$("importFile").onchange=async e=>{
+const file=e.target.files[0];if(!file)return;
+try{
+const data=JSON.parse(await file.text());
+if(!Array.isArray(data.draws)||!Array.isArray(data.combos))throw Error();
+if(!confirm("¿Importar y combinar los datos de la copia?"))return;
+for(const d of data.draws)
+if(!draws.some(x=>x.game===d.game&&x.date===d.date))draws.push(d);
+for(const c of data.combos)
+if(!combos.some(x=>x.id===c.id))combos.push(c);
+if(persist()){render();alert("Importación terminada.");}
+}catch(e){
+alert("Archivo no válido. Usa una copia exportada desde Power Predictor.");
+}
+e.target.value="";
+};
+$("clear").onclick=()=>{
+if(!confirm("Esto borrará todos los sorteos y combinaciones guardados. ¿Continuar?"))return;
+draws=[];combos=[];persist();render();
+};
+updateRules();
+</script>
+</body>
+</html>
