@@ -55,15 +55,15 @@ li{margin:10px 0;overflow-wrap:anywhere}
 <label id="bonusLabel" for="bonusNum">Bola especial</label>
 <input id="bonusNum" type="number" placeholder="Ejemplo: 9">
 <button id="saveDraw">Guardar sorteo</button>
-<p class="small">Introduce resultados oficiales verificados. Los datos no se descargan automáticamente.</p>
+<p class="small">Introduce resultados oficiales verificados. La sincronización automática requiere configurar una fuente de datos compatible; esta versión todavía no descarga sorteos por sí sola.</p>
 </section>
 
 <section>
-<h2>3. Generar combinación</h2>
-<p class="small">Genera una combinación aleatoria válida para la lotería seleccionada.</p>
-<button id="generate">Generar números</button>
+<h2>3. Generar combinaciones sugeridas</h2>
+<p class="small">Genera tres combinaciones aleatorias válidas para la lotería seleccionada. Son sugerencias recreativas: cada sorteo es aleatorio y ninguna combinación tiene garantía de ganar.</p>
+<button id="generate">Generar 3 combinaciones</button>
 <div id="generated"></div>
-<button id="saveCombo" class="secondary">Guardar combinación</button>
+<button id="saveCombo" class="secondary">Guardar las 3 combinaciones</button>
 </section>
 
 <section>
@@ -102,7 +102,7 @@ const RULES={
 power:{name:"Powerball",count:5,max:69,bonusMax:26},
 mega:{name:"Mega Millions",count:5,max:70,bonusMax:24}
 };
-let draws=[],combos=[],current=null;
+let draws=[],combos=[],current=null,currentCandidates=[];
 try{
 draws=JSON.parse(localStorage.getItem("pp_draws")||"[]");
 combos=JSON.parse(localStorage.getItem("pp_combos")||"[]");
@@ -166,22 +166,29 @@ render();
 }
 };
 
-$("generate").onclick=()=>{
-const r=rule(),arr=[];
+function makeCandidate(game){
+const r=RULES[game],arr=[];
 while(arr.length<r.count){
-let n=1+Math.floor(Math.random()*r.max);
+const n=1+Math.floor(Math.random()*r.max);
 if(!arr.includes(n))arr.push(n);
 }
 arr.sort((a,b)=>a-b);
-current={game:$("game").value,nums:arr,bonus:1+Math.floor(Math.random()*r.bonusMax)};
-$("generated").innerHTML=balls(current.nums,current.bonus)+`<p>${r.name}</p>`;
+return {game,nums:arr,bonus:1+Math.floor(Math.random()*r.bonusMax)};
+}
+$("generate").onclick=()=>{
+const game=$("game").value,r=rule();
+currentCandidates=[makeCandidate(game),makeCandidate(game),makeCandidate(game)];
+current=currentCandidates[0];
+$("generated").innerHTML=currentCandidates.map((c,i)=>
+`<div class="stat"><b>Opción ${i+1}</b>${balls(c.nums,c.bonus)}</div>`
+).join("")+`<p class="small">${r.name}: combinaciones aleatorias válidas, no predicciones garantizadas.</p>`;
 };
 $("saveCombo").onclick=()=>{
-if(!current||current.game!==$("game").value){
-alert("Primero genera una combinación.");return;
+if(!currentCandidates.length||currentCandidates.some(c=>c.game!==$("game").value)){
+alert("Primero genera las tres combinaciones.");return;
 }
-combos.push({...current,id:Date.now(),date:dateToday()});
-if(persist()){alert("Combinación guardada.");render();}
+currentCandidates.forEach((c,i)=>combos.push({...c,id:Date.now()+i,date:dateToday()}));
+if(persist()){alert("Las 3 combinaciones se guardaron.");render();}
 };
 
 function renderStats(game){
