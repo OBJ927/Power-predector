@@ -1,0 +1,19 @@
+
+name: Update lottery results
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 6 * * 2,4,6"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check workflow
+        run: |
+          echo "Power Predictor automatic update workflow started."
+          echo "Official results integration still needs to be configured."
