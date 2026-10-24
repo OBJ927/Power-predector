@@ -4,16 +4,33 @@ name: Update lottery results
 on:
   workflow_dispatch:
   schedule:
-    - cron: "30 6 * * 2,4,6"
+    - cron: "0 12 * * *"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  check:
+  update:
     runs-on: ubuntu-latest
     steps:
-      - name: Check workflow
+      - name: Get repository
+        uses: actions/checkout@v4
+
+      - name: Download Powerball results
         run: |
-          echo "Power Predictor automatic update workflow started."
-          echo "Official results integration still needs to be configured."
+          mkdir -p data
+          curl -fL "https://www.texaslottery.com/export/sites/lottery/Games/Powerball/Winning_Numbers/powerball.csv" -o data/powerball.csv
+
+      - name: Download Mega Millions results
+        run: |
+          curl -fL "https://www.texaslottery.com/export/sites/lottery/Games/Mega_Millions/Winning_Numbers/megamillions.csv" -o data/megamillions.csv
+
+      - name: Save updated results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if ! git diff --cached --quiet; then
+            git commit -m "Update lottery results"
+            git push
+          fi
