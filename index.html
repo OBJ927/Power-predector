@@ -44,6 +44,8 @@ li{margin:10px 0;overflow-wrap:anywhere}
 <option value="mega">Mega Millions</option>
 </select>
 <p class="small" id="rules"></p>
+<div class="stat" id="syncStatus">Cargando resultados oficiales…</div>
+<button id="syncNow" class="secondary" type="button">Actualizar resultados oficiales</button>
 </section>
 
 <section>
@@ -55,7 +57,7 @@ li{margin:10px 0;overflow-wrap:anywhere}
 <label id="bonusLabel" for="bonusNum">Bola especial</label>
 <input id="bonusNum" type="number" placeholder="Ejemplo: 9">
 <button id="saveDraw">Guardar sorteo</button>
-<p class="small">Introduce resultados oficiales verificados. La sincronización automática requiere configurar una fuente de datos compatible; esta versión todavía no descarga sorteos por sí sola.</p>
+<p class="small">Introduce resultados oficiales verificados. Los resultados oficiales se cargan desde los archivos CSV del repositorio. También puedes registrar un sorteo manualmente.</p>
 </section>
 
 <section>
@@ -92,7 +94,7 @@ li{margin:10px 0;overflow-wrap:anywhere}
 <button id="importBtn" class="secondary">Importar copia</button>
 <input id="importFile" type="file" accept=".json,application/json" hidden>
 <button id="clear" class="danger">Borrar todos los datos</button>
-<p class="small">Los datos se guardan en el almacenamiento local del navegador. Exporta una copia para evitar perderlos.</p>
+<p class="small">Los sorteos oficiales se leen desde GitHub; tus combinaciones y registros manuales se guardan en este navegador. Exporta una copia para evitar perder tus datos.</p>
 </section>
 </main>
 <script>
@@ -133,9 +135,77 @@ $("bonusLabel").textContent=$("game").value==="power"?"Powerball (1–26)":"Mega
 $("bonusNum").max=r.bonusMax;
 render();
 }
+
 function sortedDraws(game){
 return draws.filter(d=>d.game===game).sort((a,b)=>a.date.localeCompare(b.date));
 }
+
+// Lee CSV oficiales descargados por GitHub Actions. Formato Texas Lottery:
+// Game Name, Month, Day, Year, Num1..Num5, bola especial, multiplicador.
+function parseCsvLine(line){
+ const out=[]; let value="", quoted=false;
+ for(let i=0;i<line.length;i++){
+  const ch=line[i];
+  if(ch==='"' && line[i+1]==='"' && quoted){value+='"';i++;}
+  else if(ch==='"'){quoted=!quoted;}
+  else if(ch===',' && !quoted){out.push(value.trim());value="";}
+  else value+=ch;
+ }
+ out.push(value.trim()); return out;
+}
+function dateFromParts(m,d,y){
+ const mm=String(m).padStart(2,"0"),dd=String(d).padStart(2,"0");
+ const year=String(y).length===2?(Number(y)>50?"19":"20")+y:String(y);
+ return /^\d{4}$/.test(year)?`${year}-${mm}-${dd}`:"";
+}
+function parseOfficialCsv(text,game){
+ const lines=text.replace(/^\uFEFF/,"").split(/\r?\n/).filter(x=>x.trim());
+ const result=[];
+ for(const line of lines){
+  const c=parseCsvLine(line);
+  if(c.length<10) continue;
+  // Skip headers or non-draw rows.
+  const m=Number(c[1]),d=Number(c[2]),y=Number(c[3]);
+  const date=dateFromParts(m,d,y);
+  const nums=c.slice(4,9).map(Number),bonus=Number(c[9]);
+  if(!date || !validNums(nums,game==="power"?69:75,5) || !Number.isInteger(bonus)||bonus<1||bonus>(game==="power"?39:25)) continue;
+  result.push({game,date,nums:nums.slice().sort((a,b)=>a-b),bonus,source:"official"});
+ }
+ return result;
+}
+let officialCounts={power:0,mega:0};
+async function loadOfficialResults(){
+ const status=$("syncStatus");
+ status.textContent="Conectando con los resultados oficiales de GitHub…";
+ const sources=[["power","data/powerball.csv"],["mega","data/megamillions.csv"]];
+ let loaded=0,failed=[];
+ for(const [game,path] of sources){
+  try{
+   const response=await fetch(path+"?v="+Date.now(),{cache:"no-store"});
+   if(!response.ok) throw Error("HTTP "+response.status);
+   const text=await response.text();
+   const parsed=parseOfficialCsv(text,game);
+   if(!parsed.length) throw Error("No se reconocieron filas de sorteos");
+   officialCounts[game]=parsed.length;
+   const byDate=new Map(draws.filter(x=>x.game===game).map(x=>[x.date,x]));
+   for(const draw of parsed){
+    // Official result replaces any manual entry for the same date in memory only.
+    byDate.set(draw.date,draw);
+   }
+   draws=draws.filter(x=>x.game!==game).concat([...byDate.values()]);
+   loaded++;
+  }catch(error){failed.push((game==="power"?"Powerball":"Mega Millions")+": "+error.message);}
+ }
+ if(loaded){
+  // Preserve imported official results in local storage for offline use, without deleting combos.
+  persist();
+  status.textContent=`Resultados oficiales cargados: Powerball ${officialCounts.power} sorteos · Mega Millions ${officialCounts.mega} sorteos.`+(failed.length?" Aviso: "+failed.join("; "):"");
+  render();
+ }else{
+  status.textContent="No se pudieron cargar los CSV oficiales. Revisa la conexión o GitHub Pages. "+failed.join("; ");
+ }
+}
+
 function balls(arr,bonus){
 return '<div class="nums">'+arr.map(n=>`<span class="ball">${n}</span>`).join("")+
 `<span class="ball bonus">${bonus}</span></div>`;
@@ -198,11 +268,12 @@ const freq=Array(r.max+1).fill(0),bf=Array(r.bonusMax+1).fill(0);
 let even=0,odd=0,mainTotal=0,bonusEven=0,bonusOdd=0;
 list.forEach(d=>{
 d.nums.forEach(n=>{
+if(n<1||n>r.max)return;
 freq[n]++;mainTotal++;
 if(n%2===0)even++;else odd++;
 });
-bf[d.bonus]++;
-if(d.bonus%2===0)bonusEven++;else bonusOdd++;
+if(d.bonus>=1&&d.bonus<=r.bonusMax){bf[d.bonus]++;
+if(d.bonus%2===0)bonusEven++;else bonusOdd++;}
 });
 const ranking=Array.from({length:r.max},(_,i)=>i+1).sort((a,b)=>freq[b]-freq[a]||a-b);
 const hot=ranking.filter(n=>freq[n]>0).slice(0,5);
@@ -263,6 +334,7 @@ return `<div class="stat">Combinación ${c.date}: ${hits} números principales a
 }).join(""):"<p>No hay combinaciones guardadas para esta lotería.</p>";
 };
 $("refresh").onclick=render;
+$("syncNow").onclick=loadOfficialResults;
 $("game").onchange=updateRules;
 
 $("export").onclick=()=>{
@@ -293,6 +365,7 @@ if(!confirm("Esto borrará todos los sorteos y combinaciones guardados. ¿Contin
 draws=[];combos=[];persist();render();
 };
 updateRules();
+loadOfficialResults();
 </script>
 </body>
 </html>
